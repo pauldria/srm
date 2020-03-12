@@ -35,7 +35,20 @@ In "Diagnosing Sample Ratio Mismatch in Online Controlled Experiments: A Taxonom
 In this example, the SRM is mostly harmless. The unexpectedly uneven split would result in a slight loss of statistical power, and some confusion and bug hunting, but not much else. This type of SRM would also quickly become apparent when running A/A experiments.
 
 #### Faulty randomization function
+
+Having a good randomization function is key to your experimentation. As indicated in "Trustworthy Online Controlled Experiments : A Practical Guide to A/B Testing" ([link][practicalguide]), Microsoft initially used MD5 hashing and transitioned to SpookyHash ([link][spookyhash]) as it was more performant.
+
+You don't need any special characteristics besides randomness. The simplest way to ensure you have a good randomization function is to stress-test it. Run thousands or millions of simulated experiments, calculate the SRM p-value for each, and check the resulting p-value distribution against the uniform distribution [0,1].
+
 #### Corrupted user IDs
+
+There are two ways this could happen - the first may cause an SRM, and the second will not if you have a proper randomization function:
+
+1. Your user ID is corrupted in data processing - so the assignment remains the same but a user is split into two or more different IDs.
+2. Your user ID is corrupted in the live site - a user's ID is either corrupted or blown away/regenerated, and the variant assignment (and the experience) changes accordingly.
+
+You should have strict requirements on your ID structure, and validate your data against that. To protect against #1, periodically check your cooked logs against your raw logs, which should exist prior to any data processing. To protect against #2, track the issuance of new identifiers and the churning of existing ones. 
+
 #### Carry over effects
 
 ### Variant Deployment
@@ -67,7 +80,7 @@ In "Diagnosing Sample Ratio Mismatch in Online Controlled Experiments: A Taxonom
 
 > Experiments not redirecting all variants of a web page may have an SRM as some redirects may fail.
 
-This happens when users are not included in the experiment unless the redirect is successful, for example because telemetry is only generated after the page loads.
+This happens when users are not included in the experiment unless the redirect is successful, for example because telemetry is only generated after the page loads. To remedy this, note that your treatment is actually doing two things (the redirect, and the new experience) and adjust your design accordingly to separate out the effect of the redirect and the effect of the new experience. 
 
 #### Telemetry added or removed
 
@@ -84,13 +97,28 @@ In "Diagnosing Sample Ratio Mismatch in Online Controlled Experiments: A Taxonom
 > If the treatment degrades performance of a product, an SRM can happen as users have more time to exit the product before the  logs are generated. In contrast, improved product performance can give telemetry generation component more time to generate and send logs, frequently resulting in observing more users in the faster variant.
 
 #### Variant changing engagement
+
+
+
 #### Variant crashing the product
 
 In "The Benefits of Controlled Experimentation at Scale" ([link][benefitspaper]), the authors describe how an increase in crashes caused a "user mismatch" (i.e. an SRM):
 
 > By examining the experiment in detail, the team learned that instrumentation data was lost when the application crashed during the experiment on the older OS version. This caused unusual movements in metrics and the user mismatch. By investigating this experimental alert, the team discovered that a software bug in the new feature caused a crash in the code path related to the new feature.
 
+#### Client fetching behavior
+
+A common client architecture is for clients to fetch resource bundles on command from the server. This has the following form in terms of flow:
+1. Client makes a request and as part of the response is told they're part of a variant and given directions to fetch resources.
+2. Client fetches resources and at some point in the future deems itself ready to supply the variant experience.
+3. Client starts utilizing the variant experience, and all logging from this point forward reflects the fact that this variant is in use.
+
+This can cause an SRM if there is a difference in behavior in how treatment and control are handled in this setup. Normally the control variant doesn't need to do anything, and the client can start applying this variant.
+
+To address this, ensure that all variants fetch the same resources, and make clients choose which resoruces are necessary for their variant. This is the client analogue to the [redirect SRM](#Redirecting only some variants) scenario.
+
 #### Client caching behaviour
+
 #### Telemetry transmission
 
 ## Experiment Log Processing
@@ -133,7 +161,19 @@ Bing is known to run thousands of experiments a year, so they must have a standa
 Consider this hypothetical example - say a UI change on the Windows 10 Search Box results in twice the rate in which users click through to Bing. If you run the standard Bing analysis on a 50/50 experiment, then you will have a sample ratio of 2:1, which is an SRM.
 
 #### Missing counterfactual logging
+
+If you're missing counterfactual logging, then your triggered analysis will have no data for one or more variants. You'll run into this specific scenario if your normal non-triggered analysis looks fine and you are missing data for one or more variants in the triggered analysis.
+
+Be careful as some A/B experimentation providers silently drop variants in the analysis if no data exists, so you may forget that you have this variant at all!
+
 #### Wrong triggering or filter condition
+
+You will know you're in this bucket if your overall analysis is fine but your triggered/filtered analysis has an SRM. The only difference between the two is the trigger/filter condition. If you're here, don't believe anyone who will try to tell you that the trigger/filter condition is correct.
+
+Here are a few things to consider here:
+* If your trigger/filter condition is itself conditioned on the variant, then that reflects a bad experiment setup and design. From the data perspective, variants should be as identical as possible, with the only distinction being around _what the user experienced_.
+* if your trigger/filter condition was based off of a secondary analysis to locate specific pageviews or (in the case of a search experience) queries, then closely inspect whether this secondary analysis was truly independent of variant.
+* Simple analysis on a high-cardinality segment - such as query for a search experience - can help you find examples that are heavily skewed towards one variant, allowing you to successfully reproduce the issue.
 
 ## Experiment Interference
 
@@ -182,3 +222,5 @@ That's totally possible! This taxonomy is likely incomplete. We would love to he
 [dirtydozen]: https://dl.acm.org/doi/10.1145/3097983.3098024 "A Dirty Dozen: Twelve Common Metric Interpretation Pitfalls in Online Controlled Experiments"
 [attritionbias]: https://en.wikipedia.org/wiki/Selection_bias#Attrition "Wikipedia: Selection Bias: Attition"
 [benefitspaper]: https://ieeexplore.ieee.org/abstract/document/8051322 "The Benefits of Controlled Experimentation at Scale"
+[practicalguide]: https://experimentguide.com/ "Trustworthy Online Controlled Experiments: A Practical Guide to A/B Testing"
+[spookyhash]: https://burtleburtle.net/bob/hash/spooky.html "SpookyHash: a 128-bit noncryptographic hash"
